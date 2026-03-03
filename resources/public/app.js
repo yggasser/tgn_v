@@ -1,5 +1,5 @@
 // Fixed category filtering + stable object card + per-object color + object editing
-const state={shownCount:0,cats:[],catsAll:[],selectedCats:new Set(),catFilter:"",q:"",showLabels:true,map:null,layer:null,lastReq:0,abort:null,year:{min:null,max:null,from:null,to:null,step:10,includeUnknown:true},territories:{districts:{show:true,maxZoom:14,baseOpacity:0.34,opacity:0.34,layer:null,pane:"tDistrictsPane",zIndex:250,hueShift:0,sat:55,light:82,cat:"Районы",labels:true,labelLayer:null,labelPane:"tDistrictLabelsPane",labelZIndex:260},micro:{show:true,maxZoom:15,baseOpacity:0.26,opacity:0.26,layer:null,pane:"tMicroPane",zIndex:245,hueShift:25,sat:50,light:85,cat:"Микрорайоны"},prom:{show:true,maxZoom:15,baseOpacity:0.22,opacity:0.22,layer:null,pane:"tPromPane",zIndex:242,hueShift:210,sat:45,light:84,cat:"Промзоны"},parks:{show:true,maxZoom:16,baseOpacity:0.28,opacity:0.28,layer:null,pane:"tParksPane",zIndex:243,hueShift:120,sat:55,light:86,cat:"Парки и скверы"},cem:{show:true,maxZoom:16,baseOpacity:0.24,opacity:0.24,layer:null,pane:"tCemPane",zIndex:241,hueShift:300,sat:35,light:88,cat:"Кладбища"}}};
+const state={shownCount:0,cats:[],catsAll:[],selectedCats:new Set(),catFilter:"",q:"",showLabels:true,map:null,layer:null,lastReq:0,abort:null,year:{min:null,max:null,from:null,to:null,step:10,includeUnknown:true},styleRules:[],styleRulesLoaded:false,territories:{districts:{show:true,maxZoom:14,baseOpacity:0.34,opacity:0.34,layer:null,pane:"tDistrictsPane",zIndex:250,hueShift:0,sat:55,light:82,cat:"Районы",labels:true,labelLayer:null,labelPane:"tDistrictLabelsPane",labelZIndex:260},micro:{show:true,maxZoom:15,baseOpacity:0.26,opacity:0.26,layer:null,pane:"tMicroPane",zIndex:245,hueShift:25,sat:50,light:85,cat:"Микрорайоны"},prom:{show:true,maxZoom:15,baseOpacity:0.22,opacity:0.22,layer:null,pane:"tPromPane",zIndex:242,hueShift:210,sat:45,light:84,cat:"Промзоны"},parks:{show:true,maxZoom:16,baseOpacity:0.28,opacity:0.28,layer:null,pane:"tParksPane",zIndex:243,hueShift:120,sat:55,light:86,cat:"Парки и скверы"},cem:{show:true,maxZoom:16,baseOpacity:0.24,opacity:0.24,layer:null,pane:"tCemPane",zIndex:241,hueShift:300,sat:35,light:88,cat:"Кладбища"}}};
 const debounce=(fn,ms)=>{let t=null;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms);};};
 const setStatus=(t)=>{const el=document.getElementById("status");if(el) el.textContent=t;};
 
@@ -293,6 +293,68 @@ function featureHasAnySelectedCategory(feature){
   return false;
 }
 
+
+
+function normCatsFromFeature(feature){
+  return new Set(featureCategories(feature).map(norm));
+}
+
+function parseNum(v,def){
+  const n=Number(v);
+  return Number.isFinite(n)?n:def;
+}
+
+function parseStyleRuleLine(line){
+  const row=String(line||"").trim();
+  if(!row || row.startsWith("#")) return null;
+  const parts=row.split(";").map(x=>x.trim());
+  const cat=parts[0]||"";
+  if(!cat) return null;
+  const geom=norm(parts[1]||"any")||"any";
+  const color=(parts[2]||"").trim();
+  const weight=parseNum(parts[3],null);
+  const fillOpacity=parseNum(parts[4],null);
+  const opacity=parseNum(parts[5],null);
+  const radius=parseNum(parts[6],null);
+  return {cat:norm(cat),catRaw:cat,geom,color,weight,fillOpacity,opacity,radius};
+}
+
+function parseStyleRulesText(txt){
+  return String(txt||"").split(/\r?\n/).map(parseStyleRuleLine).filter(Boolean);
+}
+
+function rulesTextFromState(){
+  if(!state.styleRules.length){
+    return "# категория;геометрия(any|point|line|polygon);цвет;толщина;fillOpacity;opacity;радиус\n";
+  }
+  return state.styleRules.map(r=>[
+    r.catRaw||r.cat,
+    r.geom||"any",
+    r.color||"",
+    r.weight??"",
+    r.fillOpacity??"",
+    r.opacity??"",
+    r.radius??""
+  ].join("; ")).join("\n");
+}
+
+function matchStyleRule(feature){
+  const cats=normCatsFromFeature(feature);
+  if(!cats.size) return null;
+  const g=geometryFamily(feature);
+  for(const r of state.styleRules){
+    if(!cats.has(r.cat)) continue;
+    if(r.geom && r.geom!=="any" && r.geom!==g) continue;
+    return r;
+  }
+  return null;
+}
+
+function ruleAwareColor(feature){
+  const r=matchStyleRule(feature);
+  if(r && r.color) return r.color;
+  return getFeatureColor(feature);
+}
 function getFeatureColor(feature){
   const p=(feature && feature.properties) || {};
   const c = p.viewer_color ?? p.viewerColor ?? p.color ?? p["viewer_color"] ?? p["viewerColor"];
@@ -309,7 +371,19 @@ function geometryFamily(feature){
 }
 
 function featureStyle(feature){
-  const c=getFeatureColor(feature);
+  const c=ruleAwareColor(feature);
+  const cu=(c||"").toUpperCase();
+  const isYellow = (cu==="#FFEB00" || cu==="#FFFF00" || cu==="#FFD400");
+  const g=geometryFamily(feature);
+  const rule=matchStyleRule(feature);
+  if(g==="line"){
+    return {color:c,weight:parseNum(rule?.weight,(isYellow?4:3)),opacity:parseNum(rule?.opacity,0.9),lineCap:"round",lineJoin:"round"};
+  }
+  return {color:c,fillColor:c,weight:parseNum(rule?.weight,(isYellow?3:1)),fillOpacity:parseNum(rule?.fillOpacity,(isYellow?0.22:0.12)),opacity:parseNum(rule?.opacity,1)};
+}
+
+function featurePointToLayer(feature,latlng){
+  const c=ruleAwareColor(feature);
   const cu=(c||"").toUpperCase();
   const isYellow = (cu==="#FFEB00" || cu==="#FFFF00" || cu==="#FFD400");
   const g=geometryFamily(feature);
@@ -938,8 +1012,77 @@ continue;
 
 const scheduleReload=debounce(reloadObjects,200);
 
+function ensureStyleRulesEditor(){
+  if(document.getElementById("styleRulesBox")) return;
+  const hint=document.getElementById("catsHint");
+  const parent=(hint && hint.parentNode) || document.querySelector(".sidebar") || document.body;
+  const box=document.createElement("div");
+  box.id="styleRulesBox";
+  box.style.cssText="padding:8px 10px;border:1px solid #ddd;border-radius:10px;background:#fff;margin:8px 0;font-size:12.5px;line-height:1.25;color:#3b4a60;";
+  box.innerHTML = `
+    <div style="font-weight:700;margin-bottom:6px;">Правила отображения объектов</div>
+    <div style="font-size:11.5px;color:#667;margin-bottom:6px;">Формат строки: категория; геометрия(any|point|line|polygon); цвет; толщина; fillOpacity; opacity; радиус</div>
+    <textarea id="styleRulesInput" class="tg-edit-textarea" style="min-height:110px;"></textarea>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap;">
+      <button id="styleRulesApply" class="btn" type="button">Применить</button>
+      <button id="styleRulesReset" class="btn" type="button">Сбросить</button>
+      <span id="styleRulesStatus" style="font-size:11.5px;color:#667;"></span>
+    </div>
+  `;
+  parent.insertBefore(box, parent.firstChild);
+
+  const input=box.querySelector('#styleRulesInput');
+  const status=box.querySelector('#styleRulesStatus');
+  const applyBtn=box.querySelector('#styleRulesApply');
+  const resetBtn=box.querySelector('#styleRulesReset');
+
+  const updateStatus=(msg,isErr=false)=>{
+    if(!status) return;
+    status.textContent=msg||"";
+    status.style.color=isErr?"#8b0000":"#667";
+  };
+
+  if(input) input.value=rulesTextFromState();
+
+  if(applyBtn){
+    applyBtn.addEventListener('click',()=>{
+      try{
+        state.styleRules=parseStyleRulesText(input.value);
+        localStorage.setItem('tg_style_rules_v1', input.value);
+        state.styleRulesLoaded=true;
+        updateStatus(`Сохранено правил: ${state.styleRules.length}`);
+        scheduleReload();
+      }catch(e){
+        updateStatus(`Ошибка: ${e.message||e}`, true);
+      }
+    });
+  }
+
+  if(resetBtn){
+    resetBtn.addEventListener('click',()=>{
+      state.styleRules=[];
+      localStorage.removeItem('tg_style_rules_v1');
+      if(input) input.value=rulesTextFromState();
+      updateStatus('Сброшено до стандартного стиля');
+      scheduleReload();
+    });
+  }
+}
+
+function loadStyleRulesFromStorage(){
+  try{
+    const raw=localStorage.getItem('tg_style_rules_v1');
+    if(raw && raw.trim()){
+      state.styleRules=parseStyleRulesText(raw);
+      state.styleRulesLoaded=true;
+    }
+  }catch(_){ }
+}
+
 async function init(){
   ensureShownCountBox();
+  loadStyleRulesFromStorage();
+  ensureStyleRulesEditor();
 
 // Авто-слой "районы/зоны": показывается только на большом удалении (zoom <= maxZoom)
 // Можно отключить вручную (на будущее, по умолчанию включено)
@@ -988,6 +1131,18 @@ base.addTo(state.map);
 
   const qEl=document.getElementById("q");
   if(qEl) qEl.addEventListener("input",(e)=>{state.q=e.target.value; scheduleReload();});
+
+  const reloadStylesBtn=document.getElementById("reloadStyles");
+  if(reloadStylesBtn){
+    reloadStylesBtn.addEventListener("click",()=>{
+      loadStyleRulesFromStorage();
+      const input=document.getElementById("styleRulesInput");
+      const status=document.getElementById("styleRulesStatus");
+      if(input) input.value=rulesTextFromState();
+      if(status) status.textContent=`Загружено правил: ${state.styleRules.length}`;
+      scheduleReload();
+    });
+  }
 
   const clearEl=document.getElementById("clearCats");
   if(clearEl) clearEl.addEventListener("click",()=>{state.selectedCats.clear(); renderCats(); scheduleReload();});
