@@ -300,11 +300,28 @@ function getFeatureColor(feature){
   return "#3388ff";
 }
 
+function geometryFamily(feature){
+  const t=String(feature?.geometry?.type||"");
+  if(t==="Point" || t==="MultiPoint") return "point";
+  if(t==="LineString" || t==="MultiLineString") return "line";
+  if(t==="Polygon" || t==="MultiPolygon") return "polygon";
+  return "other";
+}
+
 function featureStyle(feature){
   const c=getFeatureColor(feature);
   const cu=(c||"").toUpperCase();
   const isYellow = (cu==="#FFEB00" || cu==="#FFFF00" || cu==="#FFD400");
+  const g=geometryFamily(feature);
+  if(g==="line") return {color:c,weight:(isYellow?4:3),opacity:0.9,lineCap:"round",lineJoin:"round"};
   return {color:c,fillColor:c,weight:(isYellow?3:1),fillOpacity:(isYellow?0.22:0.12)};
+}
+
+function featurePointToLayer(feature,latlng){
+  const c=getFeatureColor(feature);
+  const cu=(c||"").toUpperCase();
+  const isYellow = (cu==="#FFEB00" || cu==="#FFFF00" || cu==="#FFD400");
+  return L.circleMarker(latlng,{radius:(isYellow?8:6),weight:2,color:c,fillColor:c,fillOpacity:(isYellow?0.95:0.88)});
 }
 function hash32(str){
   // Fast deterministic hash (FNV-1a)
@@ -903,7 +920,7 @@ continue;
 
     if(state.layer) state.layer.remove();
     if(out.features.length){
-      state.layer=L.geoJSON(out,{style:featureStyle,onEachFeature}).addTo(state.map);
+      state.layer=L.geoJSON(out,{style:featureStyle,pointToLayer:featurePointToLayer,onEachFeature}).addTo(state.map);
       refreshTooltips();
     }else{
       state.layer=null;
