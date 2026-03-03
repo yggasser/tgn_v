@@ -1,0 +1,11 @@
+{
+  "input_rows_parsed": 5258,
+  "duplicates_merged": 1117,
+  "unique_objects": 4141,
+  "features_written": 4141,
+  "geometry_from_polygon": 4141,
+  "geometry_from_bbox": 0,
+  "skipped_no_bbox": 0,
+  "objects_with_categories": 1315,
+  "unique_categories": 227
+}
