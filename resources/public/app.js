@@ -386,8 +386,16 @@ function featurePointToLayer(feature,latlng){
   const c=ruleAwareColor(feature);
   const cu=(c||"").toUpperCase();
   const isYellow = (cu==="#FFEB00" || cu==="#FFFF00" || cu==="#FFD400");
-  const rule=matchStyleRule(feature);
-  return L.circleMarker(latlng,{radius:parseNum(rule?.radius,(isYellow?8:6)),weight:parseNum(rule?.weight,2),color:c,fillColor:c,fillOpacity:parseNum(rule?.fillOpacity,(isYellow?0.95:0.88)),opacity:parseNum(rule?.opacity,1)});
+  const g=geometryFamily(feature);
+  if(g==="line") return {color:c,weight:(isYellow?4:3),opacity:0.9,lineCap:"round",lineJoin:"round"};
+  return {color:c,fillColor:c,weight:(isYellow?3:1),fillOpacity:(isYellow?0.22:0.12)};
+}
+
+function featurePointToLayer(feature,latlng){
+  const c=getFeatureColor(feature);
+  const cu=(c||"").toUpperCase();
+  const isYellow = (cu==="#FFEB00" || cu==="#FFFF00" || cu==="#FFD400");
+  return L.circleMarker(latlng,{radius:(isYellow?8:6),weight:2,color:c,fillColor:c,fillOpacity:(isYellow?0.95:0.88)});
 }
 function hash32(str){
   // Fast deterministic hash (FNV-1a)
